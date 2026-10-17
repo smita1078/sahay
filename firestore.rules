@@ -1,0 +1,74 @@
+rules_version = '2';
+
+// Who can read and write what. Customers sign in anonymously and can only reach their own
+// session; bank officers sign in with Google and must be listed in the "officers" collection
+// (one document per officer, its ID being their email address; add it in the Firebase console).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isOfficer() {
+      return signedIn() && request.auth.token.email != null && request.auth.token.email_verified == true
+        && exists(/databases/$(database)/documents/officers/$(request.auth.token.email));
+    }
+    function ownsSession(sid) {
+      return signedIn() && get(/databases/$(database)/documents/sessions/$(sid)).data.ownerUid == request.auth.uid;
+    }
+
+    match /officers/{email} {
+      allow read: if isOfficer();
+      allow write: if false; // managed in the Firebase console only
+    }
+
+    match /sessions/{sid} {
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.status == "ACTIVE";
+      allow read: if isOfficer() || (signedIn() && resource.data.ownerUid == request.auth.uid);
+      // Customers may update their own session, but never change who owns it.
+      allow update: if signedIn() && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if isOfficer(); // retention purge
+
+      // Consent records are append-only: no updates or deletes by anyone (rules register D1),
+      // except the officer-run retention purge.
+      match /consents/{seq} {
+        allow read: if isOfficer() || ownsSession(sid);
+        allow create: if ownsSession(sid) && !exists(/databases/$(database)/documents/sessions/$(sid)/consents/$(seq));
+        allow update: if false;
+        allow delete: if isOfficer();
+      }
+      match /documents/{docId} {
+        allow read: if isOfficer() || ownsSession(sid);
+        allow create: if ownsSession(sid);
+        allow update: if false;
+        allow delete: if isOfficer();
+      }
+      // The live relay: the customer may only add their own typed replies; officers add questions.
+      match /relay/{seq} {
+        allow read: if isOfficer() || ownsSession(sid);
+        allow create: if !exists(/databases/$(database)/documents/sessions/$(sid)/relay/$(seq))
+          && ((ownsSession(sid) && request.resource.data.sender == "customer")
+              || (isOfficer() && request.resource.data.sender != "customer"));
+        allow update: if false;
+        allow delete: if isOfficer();
+      }
+    }
+
+    match /cases/{cid} {
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.status == "OPEN";
+      allow read: if isOfficer() || (signedIn() && resource.data.ownerUid == request.auth.uid);
+      // Only officers decide, and a rejection must carry a written reason (rules register B4, ¶18).
+      allow update: if isOfficer()
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && (request.resource.data.status != "REJECTED"
+            || (request.resource.data.decision_note is string && request.resource.data.decision_note.size() >= 15));
+      allow delete: if isOfficer();
+    }
+
+    // Write-only for customers; only officers can read. None of these hold personal data.
+    match /funnel/{id} { allow create: if signedIn(); allow read: if isOfficer(); }
+    match /audit/{id} { allow create: if signedIn(); allow read: if isOfficer(); }
+    match /scamstats/{id} { allow create: if signedIn(); allow read: if isOfficer(); }
+  }
+}
