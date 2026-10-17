@@ -3,7 +3,7 @@
 **Bank KYC that people with disabilities, and elderly customers, can actually complete, in Hindi,
 Marathi and English.**
 
-**Live prototype:** https://sahay-5d515.web.app · **Demo video:** [YouTube link] ·
+**Live prototype:** https://sahay-5d515.web.app ·
 Google Cloud AI Builder Cup 2026, Accessibility · Team: Smita Prajapati, Garima Singh
 
 Pragya Prasun, an acid attack survivor, could not open a bank account because digital KYC
